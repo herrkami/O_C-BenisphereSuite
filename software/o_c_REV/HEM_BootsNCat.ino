@@ -45,7 +45,7 @@ public:
         ForEachChannel(ch)
         {
             levels[ch] = 0;
-            eg[ch] = WaveformManager::VectorOscillatorFromWaveform(HS::Sawtooth);
+            eg[ch] = WaveformManager::VectorOscillatorFromWaveform(HS::Exponential);
             eg[ch].SetFrequency(decay[ch]);
             eg[ch].SetScale(ch ? HEMISPHERE_3V_CV : HEMISPHERE_MAX_CV);
             eg[ch].Offset(ch ? HEMISPHERE_3V_CV : HEMISPHERE_MAX_CV);
@@ -63,12 +63,15 @@ public:
         ForEachChannel(ch)
         {
             if (Changed(ch)) eg[ch].SetScale((ch ? HEMISPHERE_3V_CV : HEMISPHERE_MAX_CV) - In(ch));
-            if (Clock(ch, 1)) eg[ch].Start(); // Use physical-only clocking
+            if (Clock(ch, 1)) {  // Use physical-only clocking
+                eg[ch].Start();
+                bass.Start();  // Set phase to zero
+            }
         }
 
         // Calculate bass drum signal
         if (!eg[0].GetEOC()) {
-            levels[0] = eg[0].Next();
+            levels[0] = eg[0].Next()/2; // Divide by 2 to account for offset
             bd_signal = Proportion(levels[0], HEMISPHERE_MAX_CV, bass.Next());
         }
 
@@ -123,7 +126,7 @@ public:
         }
         ResetCursor();
     }
-        
+
     uint32_t OnDataRequest() {
         uint32_t data = 0;
         Pack(data, PackLocation {0,6}, tone[0]);
@@ -151,7 +154,7 @@ protected:
         help[HEMISPHERE_HELP_ENCODER]  = "Preset/Pan";
         //                               "------------------" <-- Size Guide
     }
-    
+
 private:
     int cursor = 0;
     VectorOscillator bass;
@@ -159,7 +162,7 @@ private:
     int noise_tone_countdown = 0;
     uint32_t noise;
     int levels[2]; // For display
-    
+
     // Settings
     int tone[2];
     int decay[2];
