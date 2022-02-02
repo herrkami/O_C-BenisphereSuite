@@ -38,7 +38,7 @@ public:
         noise_tone_countdown = 1;
         blend = 0;
 
-        bass = WaveformManager::VectorOscillatorFromWaveform(HS::Triangle);
+        bass = WaveformManager::VectorOscillatorFromWaveform(HS::Sine);
         SetBDFreq();
         bass.SetScale((12 << 7) * 3); // Audio signal is -3V to +3V due to DAC asymmetry
 
