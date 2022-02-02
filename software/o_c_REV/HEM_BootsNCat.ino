@@ -1,4 +1,5 @@
 // Copyright (c) 2018, Jason Justian
+// Copyright (c) 2022, Korbinian Schreiber
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +23,9 @@
 #include "vector_osc/WaveformManager.h"
 
 #define BNC_MAX_PARAM 63
+#define CH_BASS 0
+#define CH_SNARE 1
+#define CH_PUNCH_DECAY 2
 
 class BootsNCat : public HemisphereApplet {
 public:
@@ -33,6 +37,9 @@ public:
     void Start() {
         tone[0] = 32; // Bass drum freq
         decay[0] = 32; // Bass drum decay
+        punch = BNC_MAX_PARAM/2; // Bass drum punch
+        decay[2] = 32; // Bass drum punch decay
+
         tone[1] = 55; // Snare low limit
         decay[1] = 16; // Snare decay
         noise_tone_countdown = 1;
@@ -52,6 +59,12 @@ public:
             eg[ch].Cycle(0);
             SetEGFreq(ch);
         }
+        eg[CH_PUNCH_DECAY] = WaveformManager::VectorOscillatorFromWaveform(HS::Exponential);
+        // eg[CH_PUNCH_DECAY].SetFrequency(decay_punch);
+        eg[CH_PUNCH_DECAY].SetScale(HEMISPHERE_3V_CV);
+        eg[CH_PUNCH_DECAY].Offset(HEMISPHERE_3V_CV);
+        eg[CH_PUNCH_DECAY].Cycle(0);
+        SetPunchDecayFreq();
     }
 
     void Controller() {
@@ -60,17 +73,30 @@ public:
         int32_t bd_signal = 0;
         int32_t sd_signal = 0;
 
-        ForEachChannel(ch)
-        {
-            if (Changed(ch)) eg[ch].SetScale((ch ? HEMISPHERE_3V_CV : HEMISPHERE_MAX_CV) - In(ch));
-            if (Clock(ch, 1)) {  // Use physical-only clocking
-                eg[ch].Start();
-                bass.Start();  // Set phase to zero
-            }
+        if (Changed(CH_BASS)) eg[CH_BASS].SetScale(HEMISPHERE_MAX_CV - In(CH_BASS));
+        if (Clock(CH_BASS, 1)) {  // Use physical-only clocking
+            eg[CH_BASS].Start();
+            eg[CH_PUNCH_DECAY].Start();
+            bass.Start();  // Set phase to zero
+        }
+        if (Changed(CH_SNARE)) eg[CH_SNARE].SetScale(HEMISPHERE_3V_CV - In(CH_SNARE));
+        if (Clock(CH_SNARE, 1)) {  // Use physical-only clocking
+            eg[CH_SNARE].Start();
         }
 
         // Calculate bass drum signal
         if (!eg[0].GetEOC()) {
+            // base frequency
+            int freq = Proportion(tone[0], BNC_MAX_PARAM, 3000) + 3000;
+
+            if (!eg[CH_PUNCH_DECAY].GetEOC()) {
+                // punchy FM drop
+                int df = Proportion(eg[CH_PUNCH_DECAY].Next(), HEMISPHERE_3V_CV, freq);
+                df = Proportion(punch, BNC_MAX_PARAM/4, df);
+                freq = freq + df;
+            }
+
+            bass.SetFrequency(freq);
             levels[0] = eg[0].Next()/2; // Divide by 2 to account for offset
             bd_signal = Proportion(levels[0], HEMISPHERE_MAX_CV, bass.Next());
         }
@@ -103,26 +129,38 @@ public:
     }
 
     void OnButtonPress() {
-        if (++cursor > 4) cursor = 0;
+        if (++cursor > 8) cursor = 0;
     }
 
     void OnEncoderMove(int direction) {
-        if (cursor == 4) { // Blend
+        if (cursor == 8) { // Blend
             blend = constrain(blend + direction, 0, BNC_MAX_PARAM);
         } else {
-            byte ch = cursor > 1 ? 1 : 0;
+            byte ch = cursor > 3 ? 1 : 0;
             byte c = cursor;
-            if (ch) c -= 2;
+            if (ch) c -= 4;
 
             if (c == 0) { // Tone
                 tone[ch] = constrain(tone[ch] + direction, 0, BNC_MAX_PARAM);
-                if (ch == 0) SetBDFreq();
+                // if (ch == 0) SetBDFreq();
             }
 
             if (c == 1) { // Decay
                 decay[ch] = constrain(decay[ch] + direction, 0, BNC_MAX_PARAM);
                 SetEGFreq(ch);
             }
+
+            if (ch == 0) {
+                if (c == 2) { // FM (punch)
+                    punch = constrain(punch + direction, 0, BNC_MAX_PARAM);
+                }
+
+                if (c == 3) { // punch decay
+                    decay[CH_PUNCH_DECAY] = constrain(decay[CH_PUNCH_DECAY] + direction, 0, BNC_MAX_PARAM);
+                    SetPunchDecayFreq();
+                }
+            }
+
         }
         ResetCursor();
     }
@@ -158,41 +196,58 @@ protected:
 private:
     int cursor = 0;
     VectorOscillator bass;
-    VectorOscillator eg[2];
+    VectorOscillator eg[3];
     int noise_tone_countdown = 0;
     uint32_t noise;
     int levels[2]; // For display
 
     // Settings
     int tone[2];
-    int decay[2];
+    int decay[3];
     int8_t blend;
+    int punch;
 
     void DrawInterface() {
-        gfxPrint(1, 15, "BD Tone");
-        DrawKnobAt(15, tone[0], cursor == 0);
+        gfxBitmap(1, 15, 8, NOTE_ICON);
+        DrawKnobAt(10, 15, 18, tone[0], cursor == 0);
 
-        gfxPrint(1, 25, "  Decay");
-        DrawKnobAt(25, decay[0], cursor == 1);
+        gfxBitmap(1, 25, 8, DECAY_ICON);
+        DrawKnobAt(10, 25, 18, decay[0], cursor == 1);
 
-        gfxPrint(1, 35, "SD Tone");
-        DrawKnobAt(35, tone[1], cursor == 2);
+        gfxBitmap(1, 35, 8, FM_ICON);
+        DrawKnobAt(10, 35, 18, punch, cursor == 2);
 
-        gfxPrint(1, 45, "  Decay");
-        DrawKnobAt(45, decay[1], cursor == 3);
+        gfxBitmap(1, 45, 8, BANG_ICON);
+        DrawKnobAt(10, 45, 18, decay[CH_PUNCH_DECAY], cursor == 3);
 
-        gfxPrint(1, 55, "Blend");
-        DrawKnobAt(55, blend, cursor == 4);
+        gfxBitmap(32, 15, 8, NOTE_ICON);
+        DrawKnobAt(41, 15, 18, tone[1], cursor == 4);
+
+        gfxBitmap(32, 25, 8, DECAY_ICON);
+        DrawKnobAt(41, 25, 18, decay[1], cursor == 5);
+
+        gfxBitmap(32, 35, 8, FM_ICON);
+        DrawKnobAt(41, 35, 18, tone[1], cursor == 6);
+
+        gfxBitmap(32, 45, 8, BANG_ICON);
+        DrawKnobAt(41, 45, 18, decay[1], cursor == 7);
+
+        gfxPrint(1, 55, "BD");
+        gfxPrint(49, 55, "SN");
+        DrawKnobAt(20, 55, 20, blend, cursor == 8);
 
         // Level indicators
-        ForEachChannel(ch) gfxInvert(1, 14 + (20 * ch), ProportionCV(levels[ch], 42), 9);
+        // x, y, w, h
+        ForEachChannel(ch)
+            gfxInvert(1 + (31*ch), 63 - ProportionCV(levels[ch], 42),
+                      30, ProportionCV(levels[ch], 42));
     }
 
-    void DrawKnobAt(byte y, byte value, bool is_cursor) {
-        byte x = 45;
-        byte w = Proportion(value, BNC_MAX_PARAM, 16);
+    void DrawKnobAt(byte x, byte y, byte len, byte value, bool is_cursor) {
+        // byte x = 45;
+        byte w = Proportion(value, BNC_MAX_PARAM, len);
         byte p = is_cursor ? 1 : 3;
-        gfxDottedLine(x, y + 4, 62, y + 4, p);
+        gfxDottedLine(x, y + 4, x + len, y + 4, p);
         gfxRect(x + w, y, 2, 7);
     }
 
@@ -202,6 +257,12 @@ private:
 
     void SetEGFreq(byte ch) {
         eg[ch].SetFrequency(1000 - Proportion(decay[ch], BNC_MAX_PARAM, 900));
+    }
+
+    void SetPunchDecayFreq() {
+        // 10 ms - 200 ms -> 10000 cHz - 500 cHz
+        eg[CH_PUNCH_DECAY].SetFrequency(
+            10000 - Proportion(decay[CH_PUNCH_DECAY], BNC_MAX_PARAM, 9500));
     }
 };
 
