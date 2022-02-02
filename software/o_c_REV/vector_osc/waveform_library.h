@@ -15,6 +15,8 @@ enum {
     Pulse3,
     Pulse4,
     Trapezoid,
+    TriPeak,
+    UpAndDown,
     Logarithmic,
     Exponential,
 	EG1 = 48,
