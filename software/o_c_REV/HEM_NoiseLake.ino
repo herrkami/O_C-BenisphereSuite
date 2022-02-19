@@ -49,9 +49,7 @@ public:
     void Start() {
         noise = random(0, NOISE_VALUE_MAX);
         noise_mode = NOISE_MODE_BITFLIP;
-        CLKSetFreq(FSAMPLE);
-
-        call_count = 0;
+        CLKSetCFreq(FSAMPLE_CHZ);
 
         ForEachChannel(ch) {
             state_filter[ch].f = 32;
@@ -70,12 +68,12 @@ public:
         if (clk_phi >= CLK_PHI_MAX) {
             // Wrap phase
             clk_phi -= CLK_PHI_MAX;
-        }
-        // New noise sample
-        if (noise_mode == NOISE_MODE_BITFLIP) {
-            noise ^= (1 << random(0, 12));
-        } else {
-            noise = random(0, NOISE_VALUE_MAX);
+            // New noise sample
+            if (noise_mode == NOISE_MODE_BITFLIP) {
+                noise ^= (1 << random(0, 12));
+            } else {
+                noise = random(0, NOISE_VALUE_MAX);
+            }
         }
         ForEachChannel(ch) {
             // Freeze on postive gate
@@ -120,6 +118,7 @@ public:
         switch (cursor) {
             case 0:
                 state_clock = constrain(state_clock + direction, 0, BNC_MAX_PARAM);
+                CLKSetCFreq(Parameter2Clk(state_clock)*100);
             break;
             case 1:
                 noise_mode = constrain(noise_mode + direction, 0, 2);
@@ -176,16 +175,27 @@ private:
                                        " motion"};
     const char *FILTER_MODE_NAMES[5] = {"off", "lp", "bp", "hp", "ntc"};
 
+    const uint16_t FREQ_SCALE[64] = {
+        50,    55,    60,    66,    72,    79,    87,    95,   105,
+       115,   126,   138,   151,   166,   182,   199,   219,   240,
+       263,   288,   316,   347,   380,   417,   457,   501,   550,
+       603,   661,   725,   795,   872,   956,  1048,  1150,  1261,
+      1382,  1516,  1662,  1823,  1999,  2192,  2404,  2636,  2891,
+      3170,  3476,  3812,  4180,  4584,  5026,  5512,  6044,  6628,
+      7269,  7971,  8741,  9585, 10511, 11526, 12639, 13860, 15199,
+     16667};
+
     TDSP::FilterStateVariable filter[2];
 
     // States and CVs
     FilterState state_filter[2];
     uint8_t state_clock = 63;
 
-    const uint32_t FSAMPLE = 1666667;
+    const uint32_t FSAMPLE_CHZ = 1666667;
+    const uint16_t FSAMPLE_HZ = 16667;
     const uint32_t CLK_PHI_MAX = 0xffff;
-    uint32_t clk_phi = 0;
-    uint32_t clk_dphi;
+    uint64_t clk_phi = 0;
+    uint64_t clk_dphi;
 
     // Signals
     int16_t noise;
@@ -198,7 +208,7 @@ private:
         } else {
             gfxPrint(1, 15, "//");
         }
-        uint16_t clk = Proportion(state_clock, BNC_MAX_PARAM, 16567) + 100;
+        uint16_t clk = Parameter2Clk(state_clock);
         if (clk/10000) {
             gfxPrint(23, 15, clk);
         } else if (clk/1000) {
@@ -219,7 +229,7 @@ private:
             gfxPrint(7 + 32*ch, 35, FILTER_MODE_NAMES[state_filter[ch].mode]);
 
             // Filter frequency
-            if (cursor == 4 + ch) gfxLine(1 + 32*ch, 45, 1 + 32*ch, 39);
+            if (cursor == 4 + ch) gfxLine(1 + 32*ch, 46, 1 + 32*ch, 50);
             uint16_t f = Parameter2Frequency(state_filter[ch].f);
             if (f/100) {
                 gfxPrint(3 + 32*ch, 45, f);
@@ -234,13 +244,18 @@ private:
 
     // void DrawFilterLP()
 
-    void CLKSetFreq(uint32_t cfreq) {
+    void CLKSetCFreq(uint64_t cfreq) {
         // cfreq in cHz
-        clk_dphi = (cfreq*CLK_PHI_MAX)/FSAMPLE;
+        clk_dphi = (cfreq*CLK_PHI_MAX)/FSAMPLE_CHZ;
     }
 
     inline uint16_t Parameter2Frequency(uint8_t p) {
         return Proportion(p, BNC_MAX_PARAM, 969) + 30;
+    }
+
+    inline uint16_t Parameter2Clk(uint8_t p) {
+        p = p < 64 ? p : 63;
+        return FREQ_SCALE[p];
     }
 };
 
