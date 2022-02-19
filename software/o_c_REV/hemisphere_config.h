@@ -44,6 +44,7 @@
     DECLARE_APPLET(150, 0x20, hMIDIIn), \
     DECLARE_APPLET( 27, 0x20, hMIDIOut), \
     DECLARE_APPLET( 33, 0x10, MixerBal), \
+    DECLARE_APPLET( 62, 0x10, NoiseLake), \
     DECLARE_APPLET( 20, 0x02, Palimpsest), \
     DECLARE_APPLET( 44, 0x01, RunglBook), \
     DECLARE_APPLET( 26, 0x08, ScaleDuet), \
@@ -70,6 +71,5 @@
     DECLARE_APPLET( 53, 0x01, VectorMod), \
     DECLARE_APPLET( 54, 0x01, VectorMorph), \
     DECLARE_APPLET( 43, 0x10, Voltage), \
-    DECLARE_APPLET( 62, 0x10, NoiseLake), \
 }
 /*    DECLARE_APPLET(127, 0x80, DIAGNOSTIC), \ */

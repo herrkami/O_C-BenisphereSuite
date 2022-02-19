@@ -24,7 +24,8 @@
 namespace TDSP {
 
 // Constant multiplier for precision divisions
-const int32_t M = 2048;
+const int16_t M = 2048;
+const int16_t QMAX = M;
 
 // CF = 1/(2*pi*dt) for cHz
 // sample rate dt = 60 u
@@ -53,7 +54,7 @@ public:
 private:
     int32_t y;
     int32_t alpha;
-    const int32_t M = TDSP::M;
+    const int16_t M = TDSP::M;
     const int32_t CF = TDSP::CF;
 };
 
@@ -107,26 +108,6 @@ private:
     const int16_t M = TDSP::M;
     const int32_t CF = TDSP::CF;
 };
-
-
-
-// int FilterHP(int signal, int32_t cfreq){
-//     // cfreq is in cHz
-//     // alpha = 1/(1 + 2*pi*cfreq*dt/100)
-//     // alpha = CF/(CF + cfreq)
-//     // CF = 1/(2*pi*dt) for cHz
-//     // sample rate dt = 60 us
-//     static const int32_t CF = 265258;
-//     static const int M = TDSP_STANDARD_MULTIPLIER;
-//     int32_t alpha = (CF * M) / (CF + cfreq);
-//
-//     int32_t y = alpha*(hpf_y_prev + signal - hpf_signal_prev);
-//     y /= M;
-//     hpf_y_prev = y;
-//     hpf_signal_prev = signal;
-//     return y;
-// }
-
 
 }
 #endif // TINY_DSP
