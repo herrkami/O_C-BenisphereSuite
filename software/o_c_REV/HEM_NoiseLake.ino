@@ -65,11 +65,6 @@ public:
         int16_t signal[2];
         int16_t _noise[2];
 
-        // Debug
-        if (++call_count > 16667*0.01) { // increase every 10 ms
-            call_count = 0;
-        }
-
         // Noise clocking
         clk_phi += clk_dphi;
         if (clk_phi >= CLK_PHI_MAX) {
@@ -187,8 +182,6 @@ private:
     FilterState state_filter[2];
     uint8_t state_clock = 63;
 
-    uint16_t call_count;
-
     const uint32_t FSAMPLE = 1666667;
     const uint32_t CLK_PHI_MAX = 0xffff;
     uint32_t clk_phi = 0;
@@ -228,7 +221,11 @@ private:
             // Filter frequency
             if (cursor == 4 + ch) gfxLine(1 + 32*ch, 45, 1 + 32*ch, 39);
             uint16_t f = Parameter2Frequency(state_filter[ch].f);
-            gfxPrint(3 + 32*ch, 45, f);
+            if (f/100) {
+                gfxPrint(3 + 32*ch, 45, f);
+            } else {
+                gfxPrint(9 + 32*ch, 45, f);
+            }
             gfxIcon(22 + 32*ch, 44, HERTZ_ICON);
         }
 
