@@ -159,6 +159,7 @@ public:
         bipolar[1] = Unpack(data, PackLocation {12,1}); 
         quant_channels = Unpack(data, PackLocation {16,8});
         scale = Unpack(data, PackLocation {24,8});
+        quantizer.Configure(OC::Scales::GetScale(scale), 0xffff);
     }
 
 protected:
