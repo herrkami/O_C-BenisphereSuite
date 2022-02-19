@@ -11,7 +11,7 @@
 // * Category filtering is deprecated at 1.8, but I'm leaving the per-applet categorization
 // alone to avoid breaking forked codebases by other developers.
 
-#define HEMISPHERE_AVAILABLE_APPLETS 55
+#define HEMISPHERE_AVAILABLE_APPLETS 56
 
 //////////////////  id  cat   class name
 #define HEMISPHERE_APPLETS { \
@@ -70,5 +70,6 @@
     DECLARE_APPLET( 53, 0x01, VectorMod), \
     DECLARE_APPLET( 54, 0x01, VectorMorph), \
     DECLARE_APPLET( 43, 0x10, Voltage), \
+    DECLARE_APPLET( 62, 0x10, NoiseLake), \
 }
 /*    DECLARE_APPLET(127, 0x80, DIAGNOSTIC), \ */
