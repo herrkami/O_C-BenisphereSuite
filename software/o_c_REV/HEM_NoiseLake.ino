@@ -24,8 +24,9 @@
 
 #define NOISE_MODE_WHITE    0
 #define NOISE_MODE_BITFLIP  1
-#define NOISE_MODE_MOTION   2
-#define NOISE_VALUE_MAX     4095
+#define NOISE_MODE_CRACKLE  2
+// #define NOISE_VALUE_MAX     4095
+#define NOISE_VALUE_MAX     2047
 
 #define FILTER_MODE_OFF     0
 #define FILTER_MODE_LP      1
@@ -61,27 +62,42 @@ public:
 
     void Controller() {
         int16_t signal[2];
-        int16_t _noise[2];
 
-        // Noise clocking
-        clk_phi += clk_dphi;
-        if (clk_phi >= CLK_PHI_MAX) {
-            // Wrap phase
-            clk_phi -= CLK_PHI_MAX;
-            // New noise sample
-            if (noise_mode == NOISE_MODE_BITFLIP) {
-                noise ^= (1 << random(0, 12));
+        if (noise_mode == NOISE_MODE_CRACKLE) {
+            // Stochastic rate
+            uint16_t eta = random(0, CLK_PHI_MAX);
+            if (eta < clk_dphi) {
+                int16_t a = clk_dphi / eta;
+                a = a > 8 ? 8 : a;
+                a *= random(2) > 0 ? 1 : -1;
+                noise = a*NOISE_VALUE_MAX/8;
             } else {
-                noise = random(0, NOISE_VALUE_MAX);
+                // Exponential decay
+                noise = (noise*3)/4;
+            }
+        } else {
+            // Noise clocking
+            clk_phi += clk_dphi;
+            if (clk_phi >= CLK_PHI_MAX) {
+                // Wrap phase
+                clk_phi -= CLK_PHI_MAX;
+                if (noise_mode == NOISE_MODE_BITFLIP) {
+                    noise += NOISE_VALUE_MAX;
+                    noise ^= (1 << random(0, 12));
+                    noise -= NOISE_VALUE_MAX;
+                } else {
+                    noise = random(-NOISE_VALUE_MAX, NOISE_VALUE_MAX);
+                }
             }
         }
+
         ForEachChannel(ch) {
             // Freeze on postive gate
             if (!Gate(ch)) _noise[ch] = noise;
 
             int32_t freq = Parameter2Frequency(state_filter[ch].f);
             freq *= 100;
-            int32_t q = Proportion(state_filter[ch].q, BNC_MAX_PARAM, 2040);
+            int32_t q = Proportion(state_filter[ch].q, BNC_MAX_PARAM, 2020);
 
             filter[ch].feed(_noise[ch], freq, q);
             switch (state_filter[ch].mode) {
@@ -101,7 +117,7 @@ public:
                     signal[ch] = filter[ch].get_no();
                 break;
             }
-            Out(ch, signal[ch]);
+            Out(ch, signal[ch]/2);
         }
     }
 
@@ -172,8 +188,8 @@ private:
     uint8_t noise_mode;
     const char *NOISE_MODE_NAMES[3] = {"  white",
                                        "bitflip",
-                                       " motion"};
-    const char *FILTER_MODE_NAMES[5] = {"off", "lp", "bp", "hp", "ntc"};
+                                       "crackle"};
+    const char *FILTER_MODE_NAMES[5] = {"off", " lp", " bp", " hp", "ntc"};
 
     const uint16_t FREQ_SCALE[64] = {
         50,    55,    60,    66,    72,    79,    87,    95,   105,
@@ -199,6 +215,7 @@ private:
 
     // Signals
     int16_t noise;
+    int16_t _noise[2];
 
     // Functions
     void DrawInterface() {
@@ -226,7 +243,22 @@ private:
         ForEachChannel(ch) {
             // Filter mode
             if (cursor == 2 + ch) gfxPrint(1 + 32*ch, 35, ">");
-            gfxPrint(7 + 32*ch, 35, FILTER_MODE_NAMES[state_filter[ch].mode]);
+
+            // Q
+            if (cursor == 6 + ch) gfxPrint(1 + 32*ch, 35, "Q");
+
+            // Filter icon
+            if (state_filter[ch].mode == FILTER_MODE_LP) {
+                DrawFilterLP(14 + 32*ch, 35, state_filter[ch].q);
+            } else if (state_filter[ch].mode == FILTER_MODE_HP) {
+                DrawFilterHP(14 + 32*ch, 35, state_filter[ch].q);
+            } else if (state_filter[ch].mode == FILTER_MODE_BP) {
+                DrawFilterBP(14 + 32*ch, 35, state_filter[ch].q);
+            } else if (state_filter[ch].mode == FILTER_MODE_NOTCH) {
+                DrawFilterNotch(14 + 32*ch, 35, state_filter[ch].q);
+            } else {
+                gfxPrint(13 + 32*ch, 35, FILTER_MODE_NAMES[state_filter[ch].mode]);
+            }
 
             // Filter frequency
             if (cursor == 4 + ch) gfxLine(1 + 32*ch, 46, 1 + 32*ch, 50);
@@ -242,7 +274,65 @@ private:
         // CV type
     }
 
-    // void DrawFilterLP()
+    void DrawFilterLP(byte x, byte y, uint8_t q) {
+        // expects q = 0 .. 63
+        // width = 16
+        q += 1;  // 1 .. 64
+        q /= 16; // 0 .. 4
+        y += 7;
+        byte yc = y - 4;
+        gfxLine(x,      yc,         x + 6,  yc);
+        gfxLine(x + 6,  yc,         x + 9,  yc - q + 1);
+        gfxLine(x + 9,  yc - q + 1, x + 12, yc - q + 2);
+        gfxLine(x + 12, yc - q + 2, x + 15, y);
+    }
+
+    void DrawFilterHP(byte x, byte y, uint8_t q) {
+        // expects q = 0 .. 63
+        // width = 16
+        q += 1;  // 1 .. 64
+        q /= 16; // 0 .. 4
+        y += 7;
+        byte yc = y - 4;
+        gfxLine(15 + x, yc,         9 + x,  yc);
+        gfxLine(9 + x,  yc,         6 + x,  yc - q + 1);
+        gfxLine(6 + x,  yc - q + 1, 3 + x,  yc - q + 2);
+        gfxLine(3 + x,  yc - q + 2, 0 + x,  y);
+    }
+
+    void DrawFilterBP(byte x, byte y, uint8_t q) {
+        // expects q = 0 .. 63
+        // width = 16
+        q += 1;  // 1 .. 64
+        q /= 16; // 0 .. 4
+        y += 7;
+        byte yc = y - 4;
+        gfxLine(x,      y,          x + 5,  y);
+        gfxLine(x + 5,  y,          x + 7,  yc - q + 1);
+        gfxLine(x + 7,  yc - q + 1, x + 9, yc - q + 1);
+        gfxLine(x + 9,  yc - q + 1, x + 10, y);
+        gfxLine(x + 10, y,          x + 15, y);
+    }
+
+    void DrawFilterNotch(byte x, byte y, uint8_t q) {
+        // expects q = 0 .. 63
+        // width = 16
+        q += 1;  // 1 .. 64
+        q /= 16; // 0 .. 4
+        y += 7;
+        byte yc = y - 4;
+        gfxLine(x,      yc,         x + 5,  yc);
+        gfxLine(x + 5,  yc,         x + 7,  yc + q);
+        gfxLine(x + 7,  yc + q,     x + 9,  yc + q);
+        gfxLine(x + 9,  yc + q,     x + 10, yc);
+        gfxLine(x + 10, yc,         x + 15, yc);
+    }
+
+    int16_t WaveFolder(int16_t signal, int16_t limit) {
+        signal = signal > limit ? 2*limit - signal : signal;
+        signal = signal < -limit ? -2*limit - signal : signal;
+        return signal;
+    }
 
     void CLKSetCFreq(uint64_t cfreq) {
         // cfreq in cHz
