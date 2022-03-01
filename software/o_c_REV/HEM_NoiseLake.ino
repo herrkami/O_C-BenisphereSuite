@@ -328,10 +328,21 @@ private:
         gfxLine(x + 10, yc,         x + 15, yc);
     }
 
-    int16_t WaveFolder(int16_t signal, int16_t limit) {
+    int16_t WaveFolderSimple(int16_t signal, int16_t limit) {
         signal = signal > limit ? 2*limit - signal : signal;
         signal = signal < -limit ? -2*limit - signal : signal;
         return signal;
+    }
+
+    int16_t WaveFolder(int16_t signal, int16_t limit) {
+        signal += limit;
+        int16_t out = signal%(2*limit);
+        out = out < 0 ? -out : out;
+        if (!((signal/(2*limit))%2)) { // odd
+            out = 2*limit - out;
+        }
+        out -= limit;
+        return out;
     }
 
     void CLKSetCFreq(uint64_t cfreq) {
