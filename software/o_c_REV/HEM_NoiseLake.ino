@@ -20,7 +20,7 @@
 
 #include "tiny_dsp.h"
 
-#define BNC_MAX_PARAM 63
+#define NL_MAX_PARAM 111
 
 #define NOISE_MODE_WHITE    0
 #define NOISE_MODE_BITFLIP  1
@@ -53,17 +53,17 @@ public:
         noise_mode = NOISE_MODE_BITFLIP;
         CLKSetCFreq(FSAMPLE_CHZ);
 
-        ForEachChannel(ch) {
-            state_filter[ch].f = 32;
-            state_filter[ch].q = 32;
-        }
-        state_filter[0].mode = FILTER_MODE_LP;
-        state_filter[1].mode = FILTER_MODE_BP;
+        state_filter.f = 32;
+        state_filter.q = 32;
+        state_filter.mode = FILTER_MODE_LP;
+
+        state_wavefolder = 1;
     }
 
     void Controller() {
         int16_t signal[2];
 
+        // Noise and signal generation
         if (noise_mode == NOISE_MODE_CRACKLE) {
             // Stochastic rate
             uint16_t eta = random(0, CLK_PHI_MAX);
@@ -86,7 +86,7 @@ public:
                     noise += NOISE_VALUE_MAX;
                     noise ^= (1 << random(0, 12));
                     noise -= NOISE_VALUE_MAX;
-                } elif (noise_mode = NOISE_MODE_LINEIN) {
+                } else if (noise_mode == NOISE_MODE_LINEIN) {
                     noise = Proportion(In(0), HEMISPHERE_MAX_CV, NOISE_VALUE_MAX);
                 } else {
                     noise = random(-NOISE_VALUE_MAX, NOISE_VALUE_MAX);
@@ -94,34 +94,35 @@ public:
             }
         }
 
-        ForEachChannel(ch) {
-            // Freeze on postive gate
-            if (!Gate(ch)) _noise[ch] = noise;
+        // Freeze on postive gate
+        int32_t freq = Parameter2Frequency(state_filter.f);
+        int32_t q = Proportion(state_filter.q, NL_MAX_PARAM, 2020);
 
-            int32_t freq = Parameter2Frequency(state_filter[ch].f);
-            freq *= 100;
-            int32_t q = Proportion(state_filter[ch].q, BNC_MAX_PARAM, 2020);
-
-            filter[ch].feed(_noise[ch], freq, q);
-            switch (state_filter[ch].mode) {
-                case FILTER_MODE_OFF:
-                    signal[ch] = _noise[ch];
-                break;
-                case FILTER_MODE_LP:
-                    signal[ch] = filter[ch].get_lp();
-                break;
-                case FILTER_MODE_BP:
-                    signal[ch] = filter[ch].get_bp();
-                break;
-                case FILTER_MODE_HP:
-                    signal[ch] = filter[ch].get_hp();
-                break;
-                case FILTER_MODE_NOTCH:
-                    signal[ch] = filter[ch].get_no();
-                break;
-            }
-            Out(ch, signal[ch]/2);
+        // Filter
+        filter.feed(noise, freq, q);
+        switch (state_filter.mode) {
+            case FILTER_MODE_OFF:
+                signal[0] = noise;
+            break;
+            case FILTER_MODE_LP:
+                signal[0] = filter.get_lp();
+            break;
+            case FILTER_MODE_BP:
+                signal[0] = filter.get_bp();
+            break;
+            case FILTER_MODE_HP:
+                signal[0] = filter.get_hp();
+            break;
+            case FILTER_MODE_NOTCH:
+                signal[0] = filter.get_no();
+            break;
         }
+
+        // WaveFolder
+        signal[1] = 4*InterpolationFolder(
+            Proportion(state_wavefolder, NL_MAX_PARAM/4, signal[0]));
+
+        ForEachChannel(ch) Out(ch, signal[ch]/2);
     }
 
     void View() {
@@ -130,35 +131,29 @@ public:
     }
 
     void OnButtonPress() {
-        if (++cursor > 8) cursor = 0;
+        if (++cursor > 5) cursor = 0;
     }
 
     void OnEncoderMove(int direction) {
         switch (cursor) {
             case 0:
-                state_clock = constrain(state_clock + direction, 0, BNC_MAX_PARAM);
-                CLKSetCFreq(Parameter2Clk(state_clock)*100);
+                state_clock = constrain(state_clock + direction, 0, NL_MAX_PARAM);
+                CLKSetCFreq(Parameter2Clk(state_clock));
             break;
             case 1:
                 noise_mode = constrain(noise_mode + direction, 0, 3);
             break;
             case 2:
-                state_filter[0].mode = constrain(state_filter[0].mode + direction, 0, 4);
+                state_filter.mode = constrain(state_filter.mode + direction, 0, 4);
             break;
             case 3:
-                state_filter[1].mode = constrain(state_filter[1].mode + direction, 0, 4);
+                state_filter.f = constrain(state_filter.f + direction, 0, CFREQ_SCALE_IDX_C7);
             break;
             case 4:
-                state_filter[0].f = constrain(state_filter[0].f + direction, 0, BNC_MAX_PARAM);
+                state_filter.q = constrain(state_filter.q + direction, 0, NL_MAX_PARAM);
             break;
             case 5:
-                state_filter[1].f = constrain(state_filter[1].f + direction, 0, BNC_MAX_PARAM);
-            break;
-            case 6:
-                state_filter[0].q = constrain(state_filter[0].q + direction, 0, BNC_MAX_PARAM);
-            break;
-            case 7:
-                state_filter[1].q = constrain(state_filter[1].q + direction, 0, BNC_MAX_PARAM);
+                state_wavefolder = constrain(state_wavefolder + direction, 1, NL_MAX_PARAM);
             break;
         }
     }
@@ -195,21 +190,44 @@ private:
                                        "line in"};
     const char *FILTER_MODE_NAMES[5] = {"off", " lp", " bp", " hp", "ntc"};
 
-    const uint16_t FREQ_SCALE[64] = {
-        50,    55,    60,    66,    72,    79,    87,    95,   105,
-       115,   126,   138,   151,   166,   182,   199,   219,   240,
-       263,   288,   316,   347,   380,   417,   457,   501,   550,
-       603,   661,   725,   795,   872,   956,  1048,  1150,  1261,
-      1382,  1516,  1662,  1823,  1999,  2192,  2404,  2636,  2891,
-      3170,  3476,  3812,  4180,  4584,  5026,  5512,  6044,  6628,
-      7269,  7971,  8741,  9585, 10511, 11526, 12639, 13860, 15199,
-     16667};
+    const uint32_t CFREQ_SCALE[112] = {
+           2750,    2914,    3087,    3270,    3465,    3671,    3889,
+           4120,    4365,    4625,    4900,    5191,    5500,    5827,
+           6174,    6541,    6930,    7342,    7778,    8241,    8731,
+           9250,    9800,   10383,   11000,   11654,   12347,   13081,
+          13859,   14683,   15556,   16481,   17461,   18500,   19600,
+          20765,   22000,   23308,   24694,   26163,   27718,   29366,
+          31113,   32963,   34923,   36999,   39200,   41530,   44000,
+          46616,   49388,   52325,   55437,   58733,   62225,   65926,
+          69846,   73999,   78399,   83061,   88000,   93233,   98777,
+         104650,  110873,  117466,  124451,  131851,  139691,  147998,
+         156798,  166122,  176000,  186466,  197553,  209300,  221746,
+         234932,  248902,  263702,  279383,  295996,  313596,  332244,
+         352000,  372931,  395107,  418601,  443492,  469864,  497803,
+         527404,  558765,  591991,  627193,  664488,  704000,  745862,
+         790213,  837202,  886984,  939727,  995606, 1054808, 1117530,
+        1183982, 1254385, 1328975, 1408000, 1491724, 1580427, 1666667
+    };
+    const uint8_t CFREQ_SCALE_IDX_C7 = 75;
 
-    TDSP::FilterStateVariable filter[2];
+    const int16_t FOLDCURVE[64] = {
+        0,   406,   796,  1154,  1466,  1720,  1906,  2017,  2047,
+     1997,  1867,  1663,  1393,  1068,   700,   305,  -102,  -505,
+     -889, -1237, -1536, -1774, -1941, -2032, -2042, -1971, -1822,
+    -1601, -1316,  -979,  -604,  -204,   204,   604,   979,  1316,
+     1601,  1822,  1971,  2042,  2032,  1941,  1774,  1536,  1237,
+      889,   505,   102,  -305,  -610,  -802,  -892,  -894,  -830,
+     -719,  -582,  -439,  -305,  -191,  -104,   -46,   -14,    0,
+        0
+    };
+    const uint8_t FOLDCURVE_N = 64;
+
+    TDSP::FilterStateVariable filter;
 
     // States and CVs
-    FilterState state_filter[2];
     uint8_t state_clock = 63;
+    FilterState state_filter;
+    int16_t state_wavefolder = 0;
 
     const uint32_t FSAMPLE_CHZ = 1666667;
     const uint16_t FSAMPLE_HZ = 16667;
@@ -219,7 +237,6 @@ private:
 
     // Signals
     int16_t noise;
-    int16_t _noise[2];
 
     // Functions
     void DrawInterface() {
@@ -229,7 +246,7 @@ private:
         } else {
             gfxPrint(1, 15, "//");
         }
-        uint16_t clk = Parameter2Clk(state_clock);
+        uint16_t clk = Parameter2Clk(state_clock)/100;
         if (clk/10000) {
             gfxPrint(23, 15, clk);
         } else if (clk/1000) {
@@ -244,36 +261,43 @@ private:
         gfxPrint(20, 25, NOISE_MODE_NAMES[noise_mode]);
 
         // Filter
-        ForEachChannel(ch) {
-            // Filter mode
-            if (cursor == 2 + ch) gfxPrint(1 + 32*ch, 35, ">");
+        // Filter mode
+        if (cursor == 2) gfxPrint(1, 35, ">");
 
-            // Q
-            if (cursor == 6 + ch) gfxPrint(1 + 32*ch, 35, "Q");
+        // Frequency
+        if (cursor == 3) gfxPrint(1, 35, "f");
 
-            // Filter icon
-            if (state_filter[ch].mode == FILTER_MODE_LP) {
-                DrawFilterLP(14 + 32*ch, 35, state_filter[ch].q);
-            } else if (state_filter[ch].mode == FILTER_MODE_HP) {
-                DrawFilterHP(14 + 32*ch, 35, state_filter[ch].q);
-            } else if (state_filter[ch].mode == FILTER_MODE_BP) {
-                DrawFilterBP(14 + 32*ch, 35, state_filter[ch].q);
-            } else if (state_filter[ch].mode == FILTER_MODE_NOTCH) {
-                DrawFilterNotch(14 + 32*ch, 35, state_filter[ch].q);
-            } else {
-                gfxPrint(13 + 32*ch, 35, FILTER_MODE_NAMES[state_filter[ch].mode]);
-            }
+        // Q
+        if (cursor == 4) gfxPrint(1, 35, "Q");
 
-            // Filter frequency
-            if (cursor == 4 + ch) gfxLine(1 + 32*ch, 46, 1 + 32*ch, 50);
-            uint16_t f = Parameter2Frequency(state_filter[ch].f);
-            if (f/100) {
-                gfxPrint(3 + 32*ch, 45, f);
-            } else {
-                gfxPrint(9 + 32*ch, 45, f);
-            }
-            gfxIcon(22 + 32*ch, 44, HERTZ_ICON);
+        // Filter icon
+        if (state_filter.mode == FILTER_MODE_LP) {
+            DrawFilterLP(14, 35, state_filter.q);
+        } else if (state_filter.mode == FILTER_MODE_HP) {
+            DrawFilterHP(14, 35, state_filter.q);
+        } else if (state_filter.mode == FILTER_MODE_BP) {
+            DrawFilterBP(14, 35, state_filter.q);
+        } else if (state_filter.mode == FILTER_MODE_NOTCH) {
+            DrawFilterNotch(14, 35, state_filter.q);
+        } else {
+            gfxPrint(13, 35, FILTER_MODE_NAMES[state_filter.mode]);
         }
+
+        // Filter frequency
+        const uint8_t xo = 26;
+        uint16_t f = Parameter2Frequency(state_filter.f)/100;
+        if (f/1000) {
+            gfxPrint(3 + xo, 35, f);
+        } else if (f/100) {
+            gfxPrint(9 + xo, 35, f);
+        } else {
+            gfxPrint(15 + xo, 35, f);
+        }
+        gfxIcon(28 + xo, 34, HERTZ_ICON);
+
+        // Wavefolder
+        gfxPrint(1, 45, "WF");
+        gfxPrint(16, 45, state_wavefolder);
 
         // CV type
     }
@@ -349,22 +373,43 @@ private:
         return out;
     }
 
-    // int16_t InterpolationFolder(int16_t x) {
-    //     uint8_t
-    // }
+    int16_t InterpolationFolder(int16_t x) {
+        // dx = x_max / len(foldcurve)
+        const int16_t dx = 4*(NOISE_VALUE_MAX+1)/FOLDCURVE_N;
+        uint8_t i;
+        int32_t y;
+        if (x >= 0) {
+            i = x / dx;
+            i = i < FOLDCURVE_N - 1 ? i : FOLDCURVE_N - 2;
+            y =   (int32_t)(FOLDCURVE[i]*((i + 1)*dx - x))
+                + (int32_t)(FOLDCURVE[i + 1]*(x - i*dx));
+        } else {
+            i = -1 * x / dx;
+            i = i < FOLDCURVE_N - 1 ? i : FOLDCURVE_N - 2;
+            y =   (int32_t)(-1*FOLDCURVE[i]*((i + 1)*dx + x))
+                + (int32_t)(FOLDCURVE[i + 1]*(x + i*dx));
+        }
+        y /= dx;
+        return y;
+    }
 
     void CLKSetCFreq(uint64_t cfreq) {
         // cfreq in cHz
         clk_dphi = (cfreq*CLK_PHI_MAX)/FSAMPLE_CHZ;
     }
 
-    inline uint16_t Parameter2Frequency(uint8_t p) {
-        return Proportion(p, BNC_MAX_PARAM, 969) + 30;
+    // inline uint16_t Parameter2Frequency(uint8_t p) {
+    //     return Proportion(p, NL_MAX_PARAM, 969) + 30;
+    // }
+
+    inline uint32_t Parameter2Frequency(uint8_t p) {
+        p = p > CFREQ_SCALE_IDX_C7 ? CFREQ_SCALE_IDX_C7 : p;
+        return CFREQ_SCALE[p];
     }
 
-    inline uint16_t Parameter2Clk(uint8_t p) {
-        p = p < 64 ? p : 63;
-        return FREQ_SCALE[p];
+    inline uint32_t Parameter2Clk(uint8_t p) {
+        p = p < 112 ? p : 111;
+        return CFREQ_SCALE[p];
     }
 };
 
