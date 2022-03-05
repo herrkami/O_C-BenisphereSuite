@@ -25,6 +25,7 @@
 #define NOISE_MODE_WHITE    0
 #define NOISE_MODE_BITFLIP  1
 #define NOISE_MODE_CRACKLE  2
+#define NOISE_MODE_LINEIN   3
 // #define NOISE_VALUE_MAX     4095
 #define NOISE_VALUE_MAX     2047
 
@@ -85,6 +86,8 @@ public:
                     noise += NOISE_VALUE_MAX;
                     noise ^= (1 << random(0, 12));
                     noise -= NOISE_VALUE_MAX;
+                } elif (noise_mode = NOISE_MODE_LINEIN) {
+                    noise = Proportion(In(0), HEMISPHERE_MAX_CV, NOISE_VALUE_MAX);
                 } else {
                     noise = random(-NOISE_VALUE_MAX, NOISE_VALUE_MAX);
                 }
@@ -137,7 +140,7 @@ public:
                 CLKSetCFreq(Parameter2Clk(state_clock)*100);
             break;
             case 1:
-                noise_mode = constrain(noise_mode + direction, 0, 2);
+                noise_mode = constrain(noise_mode + direction, 0, 3);
             break;
             case 2:
                 state_filter[0].mode = constrain(state_filter[0].mode + direction, 0, 4);
@@ -186,9 +189,10 @@ private:
     int cursor;
 
     uint8_t noise_mode;
-    const char *NOISE_MODE_NAMES[3] = {"  white",
+    const char *NOISE_MODE_NAMES[4] = {"  white",
                                        "bitflip",
-                                       "crackle"};
+                                       "crackle",
+                                       "line in"};
     const char *FILTER_MODE_NAMES[5] = {"off", " lp", " bp", " hp", "ntc"};
 
     const uint16_t FREQ_SCALE[64] = {
@@ -344,6 +348,10 @@ private:
         out -= limit;
         return out;
     }
+
+    // int16_t InterpolationFolder(int16_t x) {
+    //     uint8_t
+    // }
 
     void CLKSetCFreq(uint64_t cfreq) {
         // cfreq in cHz
